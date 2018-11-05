@@ -1,0 +1,160 @@
+---
+title: "MVA - Project 3"
+author: "Carles Garriga Estrade i Balbina Virgili Rocosa"
+date: "04/02/2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("DMwR")
+library("chemometrics")
+library("VIM")
+library("robustbase")
+library("mice")
+library("mvoutlier")
+library("FactoMineR")
+library("timeSeries")
+library("bigpca")
+library("calibrate")
+```
+**All the code created for us to develop this assignment can be found on LAB03.R file. This file is located in the same folder of this document.**
+
+**Exercise 1.**
+First of all, the Russet dataset has been read and the completed matrix X has been defined with the standardized continuous data. To do it, missing values have been filled with KNN method and all data of the dataset except the one related with 'demo' variables. Also, each value of the matrix has been centered and standardized, by subtracting the centroid and dividing the result by the standardized deviation of each individual.
+
+```{r, echo=FALSE}
+# 1
+#Load the given dataset
+dataset <- read.delim("Russet_ineqdata.txt")
+#Fill the missing values of the dataset with KNN method
+filedDataset = knnImputation(dataset, k = 5, scale = T)
+#Define X matrix with continuous variables of the dataset
+X = filedDataset[1:8]
+#Number of rows
+rows = nrow(X)
+#Number of columns
+cols = ncol(X)
+#Compute the centroid G of individuals
+centroidX = as.numeric(colMeans(X))
+colsd = colStdevs(X)
+standarizedX = (X - t(replicate(rows, centroidX))) / t(replicate(rows, colsd))
+```
+
+**Exercise 2 and 3.**
+After obtaining the standardized continuous matrix, the Nonlinear Iterative Partial Least Squares (NIPALS) algorithm can be applied on the dataset. NIPALS can be described as an iterative algorithm based on simple least squares regressions for calculating principal components, one by one on each iteration. To implement it, we have used the function *nipals* of the R package *chemometrics* and, as we did on the last assignment, we treat Cuba as a supplementary variable and we just want to calculate the first five significant principal components. To execute it, we have specified the number of iterations because, otherwise, the number of default ones were not sufficient to let the matrix converge and, as a consequence, the result was not accurate. Below, a biplot is showed with the results obtained.
+
+```{r, echo=FALSE, results='hide'}
+#2
+significantDimensions = 5
+standarizedX <- standarizedX[-c(11),]
+m0 <- nipals(standarizedX, significantDimensions, it=70)
+```
+```{r, echo=FALSE, fig.align='center'}
+#3
+biplot(m0$T, m0$P, col=c('grey', 'red'), xlab='PCA1', ylab='PCA2', cex=c(0.7,0.7), cex.axis=0.7)
+```
+
+The biplot joint the representation of the individuals and variables in the same display, to be able to do it, both projections have been represented in *Rp* space. With the biplot we can see both results PCA1 and PCA2 calculated with NIPALS. We can see that the results obtained are very similar as the ones obtained on the last assignment. As data is standarized and all data is represented in a 2D plot, we cannot assure an accurate relation between variables and individuals but we can have a general idea of the relation between them. For example, *Estats-Units* seems to be very impacted by *Gnpr*, while other individuals seems to be impacted by the combination of other variables.
+
+**Exercise 4.**
+Once the principal components are obtained, we are able to find a rotation matrix *Rotmat*. To do so, we need to define the new rotated axes, which are the ones where variables tend to be very correlated with one of them and zero correlated with the other. To implement it, we have used the function *varimax* of the R package *stats* and the results obtained are showed with the plot below.
+
+```{r, echo=FALSE, out.width='.60\\linewidth', fig.height=6, fig.align='center', results='hide'}
+#4
+pc.rot <- varimax(m0$P)
+
+iden = row.names(standarizedX); etiq = names(standarizedX)
+Phi.rot = pc.rot$loadings[1:8,]
+lmb.rot = diag(t(pc.rot$loadings) %*% pc.rot$loadings)
+
+ze = rep(0,8)
+plot(Phi.rot,type="n",xlim=c(-1,1),ylim=c(-1,1))
+text(Phi.rot,labels=etiq, col="blue")
+arrows(ze, ze, Phi.rot[,1], Phi.rot[,2], length = 0.07,col="blue")
+abline(h=0,v=0,col="gray")
+circle(1)
+```
+
+With the plot obtained, the first two principal components calculated on *Exercise 2* are still represented, so the projected variance is the same as before. With this new visualization, it can be determined that *Gini* and *farm* are very correlated but both of them have no correlation with *Gnpr* and *Laboagr*, which at the same time, have a negative impact between them. With this rotated result, we have lost information of the other variables but we have a clear new view of the mentioned ones.
+
+**Exercise 5.**
+
+After computing the loadings of variables, the same has been done for the scores of individuals. They are shown on the plot below.
+
+```{r, echo=FALSE, out.width='.60\\linewidth', fig.height=6,fig.show='hold',fig.align='center', results='hide'}
+#5
+Psi_stan.rot = as.matrix(standarizedX) %*% solve(cor(as.matrix(standarizedX))) %*% Phi.rot
+Psi.rot = Psi_stan.rot %*% diag(sqrt(lmb.rot))
+
+plot(Psi.rot,type="n")
+text(Psi.rot,labels=iden)
+abline(h=0,v=0,col="gray")
+
+pca = PCA(filedDataset[,1:8], ind.sup = 11, graph=FALSE)
+pca$ind$coord[,1:5] = Psi.rot
+dimdesc(pca, axes=1:5)
+```
+
+With *dimdesc* function, the variables that have more impact on each dimension have been found and they are represented on the table below.
+
+| Dim.1  | Dim.2 | Dim.3 |  Dim.4 |  Dim.5 |
+|----------:|----------:|----------:|----------:|----------:|
+| farm (+) | Gnpr (+) | Rent (+) | Instab (-)| ecks (+)
+| Gini (+)| Laboagr (-)|  | | |
+
+We can realize that the results obtained for the first two dimensions are the same as the ones explained on *Exercise 4*. So, individuals are represented on the same way, depending on the influence of each variable they are located on the plot. For example, it can be easily interpretable that *Inde* and *Japo* seem to have a huge impact of *Laboagr*.
+
+**Exercise 6 - 7.**
+
+In order to symmetrize the data matrix previously read, we need to compute the joint feeling between different CCAA. Therefore, the feelings between two CCAA are averaged in order to compute the joint feeling.
+
+```{r, echo=FALSE}
+#6
+dataset2 <- read.delim("PCA_quetaltecaen.txt")
+
+#7
+symmetricMatrix = dataset2[,2:9]
+rownames(symmetricMatrix) = dataset2[, 1]
+colnames(symmetricMatrix) = dataset2[, 1]
+for(i in 1:nrow(symmetricMatrix)) {
+  for(j in 1:i) {
+    jointFeeling = (symmetricMatrix[i, j] + symmetricMatrix[j, i]) / 2
+    symmetricMatrix[i, j] = jointFeeling;
+    symmetricMatrix[j, i] = jointFeeling;
+  }
+}
+```
+
+**Exercise 8.**
+
+After symmetrizing the data matrix, we can compute the dissimilarity matrix. As specified in the exercise statement, no feeling has a value greater than 10, which will the value for the max similarity. In order to extract the dissimilarity matrix, for each cell, we can simply substract the value of cell of the simililarity matrix to the max. Similiarity.
+
+**Exercise 9 - 10.**
+
+Once we have extracted the dissimilarity matrix, if we want to observe the dissimilarites between two CCAA we need to increase the number of dimensions. There's no better option than using a multidimensional scaling  function together with PCA as the underlying metric to be able to compute the distances of the dissimilarity matrix. The resulting distances will represent the difference of the joint feelings between CCAA.
+
+```{r, echo=FALSE}
+#8
+dissimilarityMatrix = matrix(0,nrow(symmetricMatrix), ncol(symmetricMatrix))
+rownames(dissimilarityMatrix) = dataset2[, 1]
+colnames(dissimilarityMatrix) = dataset2[, 1]
+for(i in 1:nrow(symmetricMatrix)) {
+  for(j in 1:i) {
+    dissimilarityMatrix[i, j] = 10 - symmetricMatrix[i, j];
+    dissimilarityMatrix[j, i] = 10 - symmetricMatrix[j, i];
+  }
+}
+
+#9 && 10
+mds = cmdscale(dissimilarityMatrix)
+plot(mds[,1], mds[,2], pch = 19, cex.axis=0.7, xlim=c(-2.5,2.5))
+text(mds[,1], mds[,2], labels = dataset2[,1], pos = 4, cex=c(0.7,0.7))
+abline(h= 0, v=0, lty=2)
+
+```
+
+As seen in the plot of the first two components, both Catalunya and Euskadi are distant to the other interior CCAA, such as the Castilla's or Madrid. It can be interpreted that Catalunya and Euzkadi have completely different joint feelings to each other and to the rest of CCAA. And the are followed by Galcia and Valencia, that are more closer. The closest ones are Castilla and the rest of CCAA (Resto_CCAA) and they are the ones that have similar feelings towards the other CCAA.

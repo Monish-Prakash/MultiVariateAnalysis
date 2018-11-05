@@ -1,0 +1,200 @@
+---
+title: "MVA - Project 7"
+author: "Carles Garriga Estrade i Balbina Virgili Rocosa"
+date: "05/27/2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(rpart)
+library(rpart.plot)
+library(ROCR)
+library(DMwR)
+library(mice)
+library(VIM)
+library(caret)
+library(randomForest)
+```
+**All the code created for us to develop this assignment can be found on LAB07.R file. This file is located in the same folder of this document.**
+
+**Exercise 1 and 2**
+First of all, the Audit dataset has been read from the file. As the main goal for this assignment is to use a decision tree to predict the binary \textit{Adjusted} variable, in other words, if the individuals had made a correct financial statement or not, we have decided the predictors needed for it. After taking a look on the variables that it contains, we have discarded the \textit{ID}, as it is just an identifier and does not provide any additional information for the analysis, and \textit{Adjustment} because \textit{Adjusted} variable has been calculated from it.
+
+```{r, echo=FALSE, results='hide', comment=FALSE, message = FALSE}
+# 1
+#audit <- read_excel("audit.xlsx", na = "NA")
+audit <- read_delim("audit.csv", ";", escape_double = FALSE, trim_ws = TRUE)
+
+# 2
+audit <- audit[,-c(1, 12)]
+```
+
+In order to be able to correctly manipulate it during the following exercises, we have prepossessed the variables. A missing values analysis has been performed. 
+
+```{r, out.width='\\linewidth', fig.height=3,fig.show='hold',fig.align='center', results='hide', echo=FALSE, comment=FALSE, message=FALSE}
+#Check num. of missing values
+#which(is.na(audit))
+aggr_plot <- aggr(audit, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(data), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"), cex.numbers=0.2)
+```
+
+After checking the analysis, we have found that there are 243 missing values from variables \textit{Occupation}, \textit{Employment} and  \textit{Accounts}. As they not represent a significant quantity of the total data, the decision tree could be developed without performing them but random forest does not allow NA's values. That's why we have computed multiple imputation to fill them and we check that after its execution, there are no missing values left.
+
+```{r cache=TRUE, echo=FALSE, results='hide', message=FALSE}
+filedDataset <- audit
+#Convert categorical variables to factor, otherwise mice not working well
+cols <- c("Employment", "Education", "Marital", "Occupation", "Gender", "Accounts", "Adjusted")
+filedDataset[cols] <- lapply(filedDataset[cols], factor)
+#Fill the missing values of the dataset 
+predfiledDataset <- mice(filedDataset, m = 5, maxit = 10, method = "cart", seed = 15000)
+#predfiledDataset$loggedEvents
+filtered_audit <- complete(predfiledDataset, 1)
+```
+```{r, echo=FALSE}
+#Check num. of missing values
+which(is.na(filtered_audit))
+```
+
+
+**Exercise 3**
+Then, we have selected the last 1/3 of the observations as test data and the rest of the observations as training data.
+
+```{r, echo=FALSE, results='hide'}
+# 3
+#Select test and training data
+rows <- nrow(filtered_audit)
+training_data <- filtered_audit[1:((2/3)*rows),]
+test_data <- filtered_audit[((2/3)*rows):rows,]
+```
+
+
+**Exercise 4**
+Once our data of test and training has been defined, we are able to obtain the decision tree to predict whether the variable Adjusted on the training data. To do so, the rpart function has been used by defining the appropriate formula for prediction the Adjusted variable taking into consideration all the other variables chosen for the analysis, passing the training data and also defining the complexity parameter and the number of cross-validations for our model. The visual representation of the cross-validation results obtained for our calculated decision tree is showed below. On it, we can see that the minimum relative error is obtained when the number of splits is 6.
+
+```{r, out.width='.80\\linewidth', fig.height=3.55,fig.show='hold',fig.align='center', results='hide', echo=FALSE, comment=FALSE, message=FALSE}
+# 4
+p1 = rpart(Adjusted ~ ., data=training_data,control=rpart.control(cp=0.001, xval=10))
+printcp(p1)
+plotcp(p1)
+```
+We know that we obtain the optimal tree by pruning the maximal one up to the minimal cross-validation error. To decide the cutoff value for taking the decision more precisely, we have calculated the minimum error of our decision tree model. The optimal decision tree obtained with the values calculated is showed below, that as we can see there are 5 splits until the root point is reached.
+
+```{r, out.width='\\linewidth', fig.height=4,fig.show='hold',fig.align='center', results='hide', echo=FALSE, comment=FALSE, message=FALSE}
+p1$cptable = as.data.frame(p1$cptable)
+min_xerror = min(p1$cptable$xerror)
+xstd = p1$cptable[p1$cptable$xerror == min_xerror, ]$xstd
+
+filtered_cptable = p1$cptable[(min_xerror+xstd) > p1$cptable$xerror, ]
+optimal_splits =  filtered_cptable[1, ]$nsplit
+optimal_CP =  filtered_cptable[1, ]$CP
+```
+```{r, out.width='\\linewidth', fig.height=4,fig.show='hold',fig.align='center', echo=FALSE}
+data.frame(optimal_CP = optimal_CP, optimal_splits = optimal_splits)
+```
+```{r, out.width='\\linewidth', fig.height=4,fig.show='hold',fig.align='center', results='hide', echo=FALSE, comment=FALSE, message=FALSE}
+p2 <- prune(p1,cp=optimal_CP)
+rpart.plot(p2)
+```
+
+Taking a look at the pruned tree, we can observe that 54% people unmarried, widowed or with no spouse tend to have their finalcial statement adjusted. For those still being married and being working on a low income job (cleaner, farming, service, transport or machinist) 20% of those have had their finalcial statements adjusted. For those who have not any of the previous occupations, but they have had a minimal education, a 13% of them have had their financial statement adjusted. 13% of those who hadn't received a minimal education also had their financial statement adjusted.
+\newpage
+
+**Exercise 5**
+
+The importance of each variables on our obtained optimal tree are showed with the plot below. As we can see, they are ordered from more to less importance, so Marital, Occupation, Income and Age variables have a deep impact on the prediction of Adjusted variable. Then, Education, Gender and Hours variables also have an impact but not that much. While the other variables, Accounts, Employment and Deductions have such a poor impact on our predictions, in comparative to the other ones, that we could even consider to remove them as predictors.
+```{r, out.width='\\linewidth', fig.height=3.55,fig.show='hold',fig.align='center', results='hide', echo=FALSE, comment=FALSE, message=FALSE}
+# 5
+barplot(p2$variable.importance, cex.names = 0.5)
+```
+
+
+**Exercise 6**
+
+To be able to obtain the accuracy, precision, recall and AUC on the test individuals, first we have performed a prediction with the pruned model obtained during the exercise 4 and the data defined as test. For it, we have used the predict function of the library stats and we have needed to state the type of predicted data as class because the Adjusted data is an integer but limited to 0 or 1. Afterwards, the confusion matrix has been calculated with caret library in order to be able to compare this predicted classes with the observed ones. Thanks to the results retrieved with this confusion matrix we have been able to calculate all the qualities of our solution asked. Confusion matrix calculates the true positive, false positive, true negative and false negative values obtained with our prediction model.
+
+```{r, echo=FALSE, warning=FALSE}
+# 6
+#id <- which(!(test_data$Accounts %in% levels(as.factor(training_data$Accounts))))
+#test_data$Accounts[id] <- NA
+#str(test_data)
+#levels(as.factor(predictions))
+predictions <- predict(p2, newdata = test_data[,-c(11)], type = "class")
+
+confusionMatrix <- confusionMatrix(predictions, test_data$Adjusted)
+
+TP <- confusionMatrix$table[1,1]
+FN <- confusionMatrix$table[1,2]
+FP <- confusionMatrix$table[2,1]
+TN <- confusionMatrix$table[2,2]
+
+#Compute the accuracy, precision, recall and AUC on the test individuals.
+errorRate = (FN + FP)/length(predictions)
+acc = ((1-errorRate) *100)
+
+precisionP = (TP / (TP + FP))
+precisionN = (TN / (FN + TN))
+precision = (((precisionP + precisionN)/2) *100)
+
+recall = (TP / (TP + FN) *100)
+
+predictions1  <-  as.data.frame(predict(p2, newdata = test_data[,-c(11)], type="prob"))
+pred <- prediction(predictions1$`1`, test_data$Adjusted)
+#roc <- performance(pred,measure="tpr",x.measure="fpr")
+#plot(roc, main="ROC curve")
+#abline(0,1,col="blue")
+auc = performance(pred,"auc")
+auc = as.numeric(auc@y.values)
+
+results = data.frame(accuracy = acc, precision = precision, recall = recall, AUC = auc)
+results
+```
+\begin{itemize}
+\item The accuracy measures a ratio of correctly predicted observation to the total observations. As our result obtained is 84\%, then we can state that our model just miss 16\% of its predictions. 
+\item The precision is the ratio of correctly predicted positive observations to the total predicted positive observations. We have obtained a 74\% which is pretty good.
+\item The recall, also known as sensitivity, is the ratio of correctly predicted positive observations to the all observations in the actual class. Our result obtained is 88% which we can consider as good because it is above 50\%. 
+\item Finally, the AUC (Area Under the Curve) is the average value of sensitivity for all possible true negative values. As our result obtained is 0.82, we can consider it as good because it is much close to the perfect accuracy that is represented by 1.
+\end{itemize}
+
+
+**Exercise 7**
+Now, we want to perform a Random Forest on the same data. So, we have trained a random forest using the randomForest package with the same formula for predicting the Adjusted variable than the one used during the exercise 4. With the results obtained, the confusion matrix has also been calculated in order to be able to compare this predicted classes with the observed ones and we have calculated again the qualities of our solution obtained.
+
+```{r, echo=FALSE}
+# 7
+audit.rf = randomForest(formula = Adjusted ~ ., data = training_data, 
+                        xtest=test_data[,-11], ytest=test_data[,11], 
+                        importance=TRUE, na.action=na.fail)
+
+confusion_matrix = as.data.frame(audit.rf$test$confusion)
+
+precision_TRUE =  (confusion_matrix['1', '1']* 100)/sum(confusion_matrix$'1')
+
+precision_FALSE = (confusion_matrix['0','0']* 100)/sum(confusion_matrix$'0')
+
+avg_precision = (precision_TRUE + precision_FALSE)/2
+```
+In order to compute the average precision on the testing, we have averaged the class precision computed from the confusion matrix. The average precision has turned out to be 74\%. 
+```{r, echo=FALSE}
+avg_precision
+```
+```{r, out.width='\\linewidth', fig.height=3.55,fig.show='hold',fig.align='center', results='hide', echo=FALSE, comment=FALSE, message=FALSE}
+audit.rf[order(audit.rf$importance)]
+barplot(as.data.frame(audit.rf$importance)$MeanDecreaseGini, names.arg=row.names(as.data.frame(audit.rf$importance)), main="MeanDecreaseGini", cex.names=0.5)
+```
+Taking a look at the MeanDecreaseGini, we find that the most important variables, according to the resulting Gini index, are Age, Education, Marital, Ocupation and Income. Even the 5 most important variables are the same to the ones observed in exercise 5, we can observe that there is a remarkable difference regarding their magnitude.
+
+```{r, out.width='\\linewidth', fig.height=3.55,fig.show='hold',fig.align='center', results='hide', echo=FALSE, comment=FALSE, message=FALSE}
+plot(audit.rf)
+error.rate = mean(as.data.frame(audit.rf$err.rate)$OOB)
+```
+
+Then, the accuracy of the classifier can be computed by subtracting 1 to the average error rate OOB (grey line in the previous plot) for all trees. The final accuracy has been 83\%.
+```{r, echo=FALSE}
+ 100* (1-error.rate)
+```
+
+Finally, we can see that the accuracy and precision obtained for both predictors are almost the same. So we can see that Random Forest obtains the almost as good solution as Decision Tree for this dataset given, but no prunning to obtain an optimal solution is needed.

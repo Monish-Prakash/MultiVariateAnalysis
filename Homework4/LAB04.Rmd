@@ -1,0 +1,163 @@
+---
+title: "MVA - Project 4"
+author: "Carles Garriga Estrade i Balbina Virgili Rocosa"
+date: "04/02/2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("DMwR")
+library("chemometrics")
+library("VIM")
+library("robustbase")
+library("mice")
+library("mvoutlier")
+library("fBasics")
+library("FactoMineR")
+library("factoextra")
+library(cluster)
+library(HSAUR)
+
+```
+**All the code created for us to develop this assignment can be found on LAB04.R file. This file is located in the same folder of this document.**
+
+**Exercise 1, 2 and 3.**
+
+First of all, the Russet dataset has been read from the file and missing values have been filled with KNN method. Then, we have performed the PCA of the continuous variables using the FactoMineR library. To do it, we have defined the qualitative 'demo' variable as illustrative, by setting the parameter 'quali.sup' to the related index of the variable, and 'Cuba' individual as supplementary, by setting the attribute 'ind.sup' with the index of the outlier. The 'scale.unit' parameter has been set to 'TRUE' in order to execute the PCA using normalized euclidean distance. The results obtained are showed below and it can be seen that are the same ones that we obtained during the third homework. 
+
+```{r, echo=FALSE}
+# 1
+#Load the given dataset
+dataset = read.csv("Russet_ineqdata.txt", sep = '\t')
+#Fill the missing values of the dataset with KNN method
+filedDataset = knnImputation(dataset, k = 5, scale = T)
+```
+
+```{r, out.width='\\linewidth', fig.height=3.55,fig.show='hold',fig.align='center', results='hide', echo=FALSE}
+# 2
+par(mfrow=c(1,2), cex.axis=0.5, cex.lab=0.7, cex.main=0.7, cex.sub=0.7)
+res.pca = PCA(filedDataset, quali.sup=c(9), ind.sup=c(11), scale.unit=TRUE, ncp=5, graph=T)  
+``` 
+Now, in order to be able to select the signigicant dimensions, we have plotted below together the eigenvalues for each dimension as well as the accumulative percentage of inertia up to each dimension.
+
+```{r, out.width='\\linewidth', fig.width=4.5, fig.height=3.5, fig.show='hold',fig.align='center', results='hide', echo=FALSE}
+# 3
+plot(res.pca$eig[1:8]+0.2, type='b', ylab = NA, xlab=NA, cex.axis=0.5, cex.lab=0.7, cex.main=0.7, cex.sub=0.7)
+title("Eigenvalues (normalized)", line = 0.7, cex.main=0.7)
+abline(h = mean(res.pca$eig[1:8]), lty = 2)
+# Percentage (+ accumulated)
+text(res.pca$eig[1:8], labels = round(res.pca$eig[17:25], digits = 2), col=2, cex=0.75)
+# We pick 5 components due to 90% of inertia
+```
+As we discussed during the second homework, there are several methods that can be used to define the number of significant dimensions. We have decided, once again, to compute those taking into account the fixed percentage of inertia (>90). Therefore, the significant dimensions are the five first ones for the results obtained.
+
+**Exercise 4**
+
+```{r, echo=FALSE, results='hide'}
+# 4
+d <- dist(rbind(res.pca$ind$coord), method = "euclidean")
+hc <- hclust(d, method = "ward.D2")
+
+#plot(hc)
+
+
+#barplot(hc$height)
+#text(hc$height, labels=round(hc$height, digits=2), col=2, cex = 0.6)
+
+nc = 5
+
+#fviz_dend(hc, k = nc, cex = 0.6,  k_colors = "jco", rect = TRUE, rect_border = "jco", rect_fill = TRUE)
+
+
+c1 <- cutree(hc,nc)
+
+# VISUAL PARTITION HCLUST
+#plot(res.pca$ind$coord[,1],res.pca$ind$coord[,2],type="n",main=paste("Clustering of expenses in", toString(nc),"classes (HC)"))
+#text(res.pca$ind$coord[,1],res.pca$ind$coord[,2],col=c1,labels=rownames(res.pca$ind$coord),cex = 0.6)
+#abline(h=0,v=0,col="gray")
+
+
+cdg<- aggregate(as.data.frame(res.pca$ind$coord),list(c1),mean)[,2:(5+1)]
+
+kmeans = kmeans(res.pca$ind$coord, centers=cdg)
+Bss <- sum(rowSums(kmeans$centers^2)*kmeans$size)
+Wss <- sum(kmeans$withinss)
+Ib5 <- 100*Bss/(Bss+Wss)
+Ib5
+
+#fviz_cluster(object = kmeans, data = filedDataset[-c(11),], geom = "point", stand = FALSE, ellipse.type = "norm") + theme_bw()
+#VISUAL PARTITION USING KMEANS
+#plot(res.pca$ind$coord[,1],res.pca$ind$coord[,2],type="n",main=paste("Clustering of expenses in", toString(nc),"classes (kmeans)"))
+#text(res.pca$ind$coord[,1],res.pca$ind$coord[,2],col=kmeans$cluster,labels=rownames(res.pca$ind$coord),cex = 0.6)
+#abline(h=0,v=0,col="gray")
+```
+
+**Exercise 5**
+
+After the clusters are defined, we need to interpret and represent them in the first factorial display using the function 'catdes' of the FactoMineR library. To do it, we need to pass to the function the defined clusters with the dataset used to define them. The number of response variables is set to 1. The most significant results obtained for each cluster are showed below.
+
+```{r, echo=FALSE, results='hide'}
+# 5
+catdesPlot = catdes(cbind(as.factor(kmeans$cluster),filedDataset[-11,-9]),1)
+#catdesPlot
+catdesPlot$quanti$`1`
+catdesPlot$quanti$`2`
+
+#plot.catdes(catdesPlot)
+```
+
+| **Cluster 1**  | farm | Gini |  Laboagr  |  Instab   |   Gnpr |
+|----------:|----------:|----------:|----------:|----------:|----------:|
+| v.test | 4.496867 | 4.210871  | 3.311864 | 3.156425 |-3.624185 |
+| p.test | 6.896198e-06 | 2.543884e-05 | 9.267655e-04 | 1.597162e-03 | 2.898740e-04 |
+
+
+| **Cluster 2**  | Gnpr |   Rent  | Laboagr |
+|----------:|----------:|----------:|----------:|
+| v.test |  4.146770 | 2.487275 | -3.959736 |
+| p.test | 3.371991e-05 | 1.287260e-02 | 7.503270e-05 |
+
+| **Cluster 4**  | Gnpr   |   ecks    |  Rent    |  Gini    |  farm |
+|----------:|----------:|----------:|----------:|----------:|----------:|
+| v.test | 2.070405 | -2.477637 | -3.291283 | -4.543160 | -5.048875 |
+| p.test | 3.841447e-02 | 1.322556e-02 | 9.973150e-04 | 5.541724e-06 | 4.444186e-07 |
+
+| **Cluster 3**  | Death |   ecks  |     | **Cluster 5**  | Rent  |  Instab  |
+|----------:|----------:|----------:|----------:|----------:|----------:|----------:|
+| v.test |  5.838112 | 2.126104 |      | v.test |  2.627079 | -4.592467 | 
+| p.test | 5.279572e-09 | 3.349457e-02 |    | p.test | 8.612130e-03 | 4.380374e-06 | 
+
+With catdes function we want to realize which are the most significant continuous variables on each clustered defined. This way, we are able to find out the profiling, which is the significant characteristics which make the group of individuals different than the other whole set of individuals. For it, we first have a look on p.test calculated value. The p.test is less than 5% when one category is significantly linked to another categories, so we realize that all variables that catdes return, are already below this stablized threshold. For this reason, we need to also have a look to v.test value, which is the one that gives us more information.
+
+After ordering them by v.test value, we then state that if the v.test is positive, it means that the category is over-expressed for the category and if the v-test is negative it means that the category is under-expressed for the category. So, with the results retrieved we can see that the first cluster is best expressed by farm and Gini, but it is also expressed by Laboagr and Instab but it is under-expressed by Gnpr. On the other hand, the second cluster is best expressed by Gnpr, also expressed by Rent, and under-expressed by Laboagr. The third one is well-expressed by Death and ecks. The forth one is over-expressed by Gnpr but under-expressed by ecks, Rent, Gini and farm. Finally, the fifth cluster is over-expressed by Rent but under-expressed by Instab. To conclude, we can see that all clusters are expressed with different variables so we are able to say that we have defined clusters that have significant different characteristics to the other ones. 
+
+
+**Exercise 6**
+
+Finally, with the results developed during the previous exercises, we would like to assign Cuba to one of the defined clusters. To do it, we are going to calculate the distance between each centroid of the defined clusters and the new individual Cuba that we want to assign. That is why the euclidean distance of the five principal dimensions defined from Cuba to each cluster is calculated. As we want Cuba to be on the same plane as the clusters' centroids, otherwise we are not able to correctly compare them, we extract the Cuba's coordinates, which are in the first fatorial plane, from the PCA response. The results obtained from the calculations developed are showed below.
+
+```{r, echo=FALSE}
+# 6
+euc_dist <- function(x1, c1){ 
+  total <- 0;
+  for(i in 1:ncol(x1)) {
+    diff = sum((x1[,i] - c1[i])^ 2);
+    total = total + diff;
+  }
+  return(sqrt(total)) 
+}
+
+#result <- euc_dist(res.pca$ind.sup$coord, kmeans$centers[1,])
+clusters <- c()
+for(j in 1:nrow(kmeans$centers)){
+  result <- euc_dist(res.pca$ind.sup$coord, kmeans$centers[j,])
+  clusters <- cbind(clusters, result)
+}
+print(clusters[1,])
+```
+
+There are two different methods to define which cluster is more accurate for Cuba, crisp or soft. As we have been able to calculate the euclidean distance from each cluster centroid to the individuals, we are going to use crisp for this exercise. As we can see with the results retrieved, the smallest distance calculeted is obtained from the third cluster. So, we should assign cuba to the third cluster.
